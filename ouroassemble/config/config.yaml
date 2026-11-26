@@ -32,7 +32,8 @@ hifiasm_meta:
   # also take circular contigs from *.rescue.fa (flagged source=rescue)
   include_rescue: false
   threads: 32
-  mem_mb: 128000
+  # peak ~10 GB per Gbp of reads (148-190 GB measured on 15-19 Gbp samples)
+  mem_mb: 200000
   runtime: 2880
 
 metaflye:
@@ -48,7 +49,12 @@ hicanu:
   # stopOnLowCoverage), otherwise low-depth samples abort.
   params: "maxInputCoverage=10000 corOutCoverage=10000 corMhapSensitivity=high corMinCoverage=0 minInputCoverage=0 stopOnLowCoverage=0"
   extra: ""
-  threads: 32
+  # "all" = every core of the run (`ouroassemble run -t`). Locally HiCanu then waits until
+  # the other assemblers have finished and runs alone on the whole machine, which suits its
+  # long, well-parallelised overlap stage. On a cluster (--profile) it asks for
+  # `cluster_threads` instead.
+  threads: all
+  cluster_threads: 32
   mem_mb: 128000
   runtime: 4320
 
@@ -156,3 +162,6 @@ default_threads: 4       # for light-weight rules
 # Every step's mem_mb above is capped at this value. When running locally, the total
 # memory of concurrently running jobs is also kept below it. null = no limit.
 max_memory_gb: null
+# Total cores of a local run; `ouroassemble run -t` sets it (not used with --profile).
+# Jobs with `threads: all` take this many threads.
+local_cores: null

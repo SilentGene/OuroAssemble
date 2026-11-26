@@ -67,3 +67,53 @@ def test_memory_cap_applies_to_every_job(tmp_path):
     mems = [int(m) for m in re.findall(r"mem_mb=(\d+)", dry.stdout + dry.stderr)]
     assert mems and max(mems) == 20480
     assert 4000 in mems  # small jobs keep their own (lower) value
+
+
+def test_hicanu_threads_all(tmp_path):
+    """HiCanu defaults to `threads: all`: every core of a local run (-t), else 32."""
+    import re
+    import subprocess
+    import sys
+
+    from ouroassemble import SNAKEFILE
+
+    reads = tmp_path / "reads.fq.gz"
+    reads.write_bytes(b"")
+    out = tmp_path / "out"
+    res = runner.invoke(
+        app,
+        ["run", "-r", str(reads), "-o", str(out), "-a", "hicanu", "-t", "12",
+         "--skip-checkm2", "--skip-gtdbtk", "--skip-genomad", "--dry-run"],
+    )  # fmt: skip
+    assert res.exit_code == 0, res.output
+    run_cfg = out / "ouroassemble.config.yaml"
+    cfg = yaml.safe_load(run_cfg.read_text())
+    assert cfg["local_cores"] == 12
+
+    def canu_threads(config_file):
+        dry = subprocess.run(
+            [sys.executable, "-m", "snakemake", "-s", str(SNAKEFILE), "-d", str(out),
+             "--configfile", str(config_file), "-n", "-p", "--cores", "64"],
+            capture_output=True, text=True,
+        )  # fmt: skip
+        return re.findall(r"maxThreads=(\d+)", dry.stdout + dry.stderr)
+
+    assert canu_threads(run_cfg) == ["12"]
+    # cluster profile: no local total, fall back to cluster_threads
+    cfg["local_cores"] = None
+    cluster_cfg = tmp_path / "cluster.yaml"
+    cluster_cfg.write_text(yaml.safe_dump(cfg))
+    assert canu_threads(cluster_cfg) == ["32"]
+
+
+def test_resume_keeps_finished_steps(tmp_path):
+    reads = tmp_path / "reads.fq.gz"
+    reads.write_bytes(b"")
+    out = tmp_path / "out"
+    res = runner.invoke(
+        app,
+        ["run", "-r", str(reads), "-o", str(out), "-a", "hicanu", "--resume",
+         "--skip-checkm2", "--skip-gtdbtk", "--skip-genomad", "--dry-run"],
+    )  # fmt: skip
+    assert res.exit_code == 0, res.output
+    assert "--rerun-triggers mtime" in " ".join(res.output.split())

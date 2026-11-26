@@ -105,8 +105,17 @@ wildcard_constraints:
 
 
 def job(section):
-    """threads / resources of a config section."""
-    return config[section]
+    """threads / resources of a config section.
+
+    `threads: all` means every core of a local run: `local_cores`, which `ouroassemble run`
+    sets from `-t` when no --profile is used. Under a cluster profile (or plain `snakemake`
+    without `local_cores`) there is no such total, so the job asks for `cluster_threads`
+    (default 32) instead.
+    """
+    cfg = dict(config[section])
+    if cfg.get("threads") == "all":
+        cfg["threads"] = int(config.get("local_cores") or cfg.get("cluster_threads", 32))
+    return cfg
 
 
 MAX_MEM_MB = int(config["max_memory_gb"] * 1024) if config.get("max_memory_gb") else None

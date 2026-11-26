@@ -29,6 +29,11 @@ snakemake -s $(python -c "import ouroassemble;print(ouroassemble.SNAKEFILE)") \
 * Per step: `metamdbg`, `hifiasm_meta`, `metaflye`, `hicanu`, `mapping`, `checkm2`,
   `gtdbtk`, `genomad` each take `mem_mb` in the config. HiCanu's `maxMemory` follows it.
 * hifiasm-meta needs > 16 GB even for small inputs (default Bloom filter `-f 37`).
+* CPUs: each step's `threads` is a fixed number, except HiCanu's default `threads: all`,
+  which takes every core of a local run (`-t`). HiCanu then starts once the other
+  assemblers have freed their cores and runs alone, which suits its long, well
+  parallelised overlap stage. With `--profile` it requests `hicanu.cluster_threads`
+  (default 32) instead. Any step can use `threads: all`, or set HiCanu back to a number.
 
 ### On a cluster
 
@@ -40,6 +45,34 @@ be tuned per step:
 metaflye: {threads: 48, mem_mb: 200000, runtime: 2880}
 gtdbtk:   {threads: 32, mem_mb: 160000}
 ```
+
+### Resuming an interrupted run
+
+If a run stops part-way (walltime reached, node failure, Ctrl-C), run the same command
+again with `--resume`, optionally with more threads or memory:
+
+```bash
+ouroassemble run -r reads.fq.gz -o out -c my.yaml -t 36 -m 200 --resume
+```
+
+* Snakemake's stale lock is removed, and only missing files are made: finished steps are
+  kept even if the config or OuroAssemble changed in between (`--rerun-triggers mtime`).
+  Make sure no other run is using the same output directory.
+* The assemblers continue from their own intermediate files in `02_assembly/<assembler>/`:
+
+  | Assembler | Resumes from |
+  |---|---|
+  | HiCanu | its last finished task (e.g. individual overlap jobs) |
+  | metaFlye | its last finished stage (`--resume`) |
+  | hifiasm-meta | its saved read correction and overlaps (`*.bin`); if these are unusable, it starts over |
+  | metaMDBG | cannot resume (starts over; it is the fastest assembler) |
+
+  A signature of the reads and assembler options is kept in
+  `02_assembly/<assembler>/.ouroassemble_resume`. If the reads or options change, that
+  directory is emptied and the assembler starts from scratch instead, so stale
+  intermediate files are never reused. Threads and memory are not part of the signature.
+* To chain a resume job after a cluster job that may hit its walltime, make it depend on
+  the first job ending in any state (PBS: `-W depend=afterany:<jobid>`).
 
 ## 3. Steps and files
 

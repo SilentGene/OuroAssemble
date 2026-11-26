@@ -1,15 +1,18 @@
 # OuroAssemble
 
-**OuroAssemble** recovers and validates **circular genomes** (complete chromosomes,
-plasmids and viruses) from a **PacBio HiFi metagenome**. It assembles the reads with
-four metagenome assemblers, collects every contig an assembler marks as circular,
-checks each circular junction with the HiFi reads, classifies the survivors and
-dereplicates genomes found by more than one assembler. It then combines the four
-assemblies into one **non-redundant merged assembly** in which validated circles come
-first and the best-supported linear contigs from any assembler fill in the rest.
+**OuroAssemble** assembles a **PacBio HiFi metagenome** with four metagenome assemblers
+(metaMDBG, hifiasm-meta, metaFlye and HiCanu) and combines their results into one
+**non-redundant merged assembly** that keeps the best-supported contigs from every
+assembler.
+
+Along the way it recovers and validates **circular genomes** (complete chromosomes,
+plasmids and viruses): it collects every contig an assembler marks as circular, checks
+each circular junction with the HiFi reads, classifies the survivors and dereplicates
+genomes found by more than one assembler. These validated circles are placed first in
+the merged assembly, and the best linear contigs from any assembler fill in the rest.
 
 ```mermaid
-flowchart LR
+flowchart 
     reads[/"PacBio HiFi reads"/] --> filter["Filter reads<br/>(&lt; 500 bp removed)"]
 
     subgraph assembly["Assembly"]
@@ -21,7 +24,8 @@ flowchart LR
     end
 
     filter --> mdbg & hifiasm & flye & canu
-    mdbg & hifiasm & flye & canu --> cand["Circular candidates"]
+    mdbg & hifiasm & flye & canu --> asms[("All assemblies")]
+    asms --> cand["Circular candidates"]
     cand --> trim["Trim closing overlap<br/>+ rotate (A+B → B+A)"]
     trim --> junction{"Junction validation<br/>(minimap2 map-hifi)"}
 
@@ -31,7 +35,7 @@ flowchart LR
     size -- "no" --> small["geNomad"]
     large & small --> derep["Dereplicate<br/>(skani / minimap2)"]
     derep --> merge["Merge assemblies<br/>(circles + best linear contigs,<br/>containment filter)"]
-    mdbg & hifiasm & flye & canu -. "all contigs" .-> merge
+    asms -. "all contigs" .-> merge
     merge --> report[/"Report + final FASTAs<br/>+ merged assembly"/]
 ```
 
@@ -92,6 +96,7 @@ ouroassemble run -r reads.fq.gz -o results -a metaflye,metamdbg     # subset of 
 ouroassemble run -r reads.fq.gz -o results -t 32 -m 200             # use at most 200 GB RAM
 ouroassemble run -r reads.fq.gz -o results --profile my_cluster     # Snakemake profile
 ouroassemble run -r reads.fq.gz -o results -n                       # dry run
+ouroassemble run -r reads.fq.gz -o results -t 36 --resume           # continue an interrupted run
 ouroassemble run -r reads.fq.gz -o results -- --keep-going          # extra Snakemake args
 ```
 
@@ -100,6 +105,28 @@ ouroassemble run -r reads.fq.gz -o results -- --keep-going          # extra Snak
 total memory of jobs running at the same time below that value; with `--profile` it is
 the largest amount a single cluster job requests. Per-step values can be set in the
 config (`<step>: {mem_mb: ...}`).
+
+### CPU and RAM for the assemblers
+
+Assembly is by far the most demanding stage. Suggested resources per assembler, with
+what we measured on lake-sediment HiFi metagenomes of 15–19 Gbp (18 threads each):
+
+| Assembler | CPUs | RAM | Measured (15–19 Gbp) |
+|---|---|---|---|
+| metaMDBG | 16–32 | 16 GB | 0.7–1 h, peak 4–5 GB |
+| hifiasm-meta | 16–32 | **~10 GB per Gbp of reads** (≥ 200 GB for 20 Gbp) | 0.8–5.4 h, peak 148–190 GB |
+| metaFlye | 32 | ~5 GB per Gbp (100 GB for 20 Gbp) | 1.9–3 h, peak 46–80 GB |
+| HiCanu | as many as possible (default `threads: all`) | 100–128 GB (stays within `maxMemory`) | the slowest by far: > 24 h, mostly all-vs-all overlaps |
+
+* Memory grows with the amount of reads (and their diversity); run time of HiCanu grows
+  roughly with its square. Set the values per assembler in the config, e.g.
+  `hifiasm_meta: {threads: 32, mem_mb: 200000}`.
+* On one node, `-t`/`-m` are shared: assemblers run side by side as long as their
+  `threads` and `mem_mb` fit. hifiasm-meta's peak alone can fill a 200 GB node, so give it
+  a realistic `mem_mb` rather than letting it share the node with another large job.
+* With `--profile`, each assembler is its own cluster job with exactly these resources.
+* A run that hits its walltime can be continued with `--resume` (HiCanu, metaFlye and
+  hifiasm-meta pick up where they stopped; see [docs/usage.md](docs/usage.md)).
 
 Set `OUROASSEMBLE_CONDA_PREFIX` (or `--conda-prefix`) to share the rule environments
 between runs instead of rebuilding them in every output directory.

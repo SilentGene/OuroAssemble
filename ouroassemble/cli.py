@@ -168,6 +168,17 @@ def run(
         typer.Option(help="Shared dir for rule conda envs [env: OUROASSEMBLE_CONDA_PREFIX]."),
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", "-n", help="Only show jobs.")] = False,
+    resume: Annotated[
+        bool,
+        typer.Option(
+            "--resume",
+            help="Continue an interrupted run (e.g. killed at walltime) in the same output "
+            "directory: removes Snakemake's stale lock, keeps every finished step even if "
+            "the config or OuroAssemble changed since (only missing files are made), and "
+            "lets HiCanu / metaFlye / hifiasm-meta pick up where they stopped. Threads and "
+            "memory may be changed. Make sure no other run uses this directory.",
+        ),
+    ] = False,
 ) -> None:
     """Run the full pipeline on one HiFi metagenome."""
     cfg: dict = {}
@@ -183,6 +194,8 @@ def run(
         overrides["sample"] = sample
     if memory:
         overrides["max_memory_gb"] = memory
+    # `threads: all` jobs (HiCanu by default) take every core of a local run
+    overrides["local_cores"] = None if profile else threads
     if assemblers:
         chosen = [a.strip() for a in assemblers.split(",") if a.strip()]
         bad = [a for a in chosen if a not in ASSEMBLERS]
@@ -221,6 +234,8 @@ def run(
     summary.add_row(
         "[bold]execution", f"profile {profile}" if profile else f"local, {threads} cores"
     )
+    if resume:
+        summary.add_row("[bold]mode", "resume")
     max_mem = cfg.get("max_memory_gb")
     if max_mem:
         scope = "per job" if profile else "per job and in total"
@@ -233,6 +248,15 @@ def run(
         extra += ["--resources", f"mem_mb={int(max_mem * 1024)}"]
     if profile and not any(a in ("--jobscript", "--js") for a in extra):
         extra += ["--jobscript", str(write_jobscript(outdir))]
+    if resume:
+        if "--rerun-triggers" not in extra:
+            # only missing/outdated files count, not code, params or software-env changes
+            extra += ["--rerun-triggers", "mtime"]
+        locks = outdir / ".snakemake" / "locks"
+        if not dry_run and locks.is_dir() and any(locks.iterdir()):
+            console.print("[yellow]Removing the lock left by the interrupted run")
+            unlock = [SNAKEFILE, outdir, run_config, threads, None, False, conda_prefix]
+            run_snakemake(snakemake_cmd(*unlock, ["--unlock"]))
     cmd = snakemake_cmd(
         SNAKEFILE, outdir, run_config, threads, profile, dry_run, conda_prefix, extra
     )
