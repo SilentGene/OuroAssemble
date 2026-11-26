@@ -1,0 +1,95 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ouroassemble"
+dynamic = ["version"]
+description = "Multi-assembler recovery and validation of circular genomes from PacBio HiFi metagenomes"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "OuroAssemble developers" }]
+keywords = ["metagenomics", "assembly", "pacbio", "hifi", "circular genome", "snakemake"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "snakemake>=9.2.0",
+    "typer>=0.12",
+    "rich>=13",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+ouroassemble = "ouroassemble.cli:app"
+
+[tool.hatch.version]
+path = "ouroassemble/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ouroassemble"]
+# ship the workflow (Snakefile, rules, scripts, envs, schemas, config) as package data
+artifacts = ["ouroassemble/Snakefile", "ouroassemble/workflow/**", "ouroassemble/config/*.yaml"]
+exclude = ["ouroassemble/config/databases.site.yaml"]
+
+[tool.hatch.build.targets.sdist]
+include = ["ouroassemble", "tests", "docs", "example/*.sh", "example/*.md", "README.md", "LICENSE", "environment.yaml"]
+exclude = ["ouroassemble/config/databases.site.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-include = ["*.smk", "**/Snakefile"]
+extend-exclude = ["*.smk", "**/Snakefile"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# ----------------------------------------------------------------------------
+# pixi (https://pixi.sh): `pixi install && pixi run ouroassemble --help`
+# ----------------------------------------------------------------------------
+[tool.pixi.workspace]
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+snakemake = ">=9.2.0"
+# conda is required for Snakemake's per-rule environments (--software-deployment-method conda)
+conda = ">=24.7.1"
+# cluster execution via Snakemake profiles (`ouroassemble run --profile ...`):
+# generic submit/status/cancel commands (PBS, SGE, mqsub, ...) and native SLURM
+snakemake-executor-plugin-cluster-generic = ">=1.0.9"
+snakemake-executor-plugin-slurm = "*"
+typer = ">=0.12"
+rich = ">=13"
+pyyaml = ">=6"
+
+[tool.pixi.pypi-dependencies]
+ouroassemble = { path = ".", editable = true }
+
+[tool.pixi.feature.dev.dependencies]
+pytest = ">=8"
+ruff = ">=0.5"
+numpy = "*"
+pysam = "*"
+mappy = "*"
+
+[tool.pixi.environments]
+default = { features = ["dev"], solve-group = "default" }
+
+[tool.pixi.tasks]
+test = "pytest -q"
+lint = "ruff check . && ruff format --check ."
+example-data = "bash example/prepare_example.sh"
+example = "ouroassemble run -r example/data/reads.fq.gz -o example/output -t 8"

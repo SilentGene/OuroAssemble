@@ -1,0 +1,11 @@
+# OuroAssemble — Snakemake entry point.
+# All logic lives in workflow/Snakefile; the default target is defined here
+# because Snakemake picks its default target from the main Snakefile.
+
+include: "workflow/Snakefile"
+
+
+rule all:
+    default_target: True
+    input:
+        FINAL,

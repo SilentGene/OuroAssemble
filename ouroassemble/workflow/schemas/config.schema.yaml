@@ -1,0 +1,119 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+description: OuroAssemble configuration (after merging with the defaults)
+type: object
+
+definitions:
+  job:
+    type: object
+    properties:
+      threads: {type: integer, minimum: 1}
+      mem_mb: {type: integer, minimum: 100}
+      runtime: {type: integer, minimum: 1}
+  path_or_null:
+    type: ["string", "null"]
+
+properties:
+  reads:
+    type: string
+    description: PacBio HiFi reads (FASTQ/FASTA, optionally gzipped)
+  sample:
+    type: string
+    pattern: "^[A-Za-z0-9._-]+$"
+  min_read_len: {type: integer, minimum: 0}
+  assemblers:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items: {type: string, enum: [metamdbg, hifiasm_meta, metaflye, hicanu]}
+  assembler_priority:
+    type: array
+    items: {type: string, enum: [metamdbg, hifiasm_meta, metaflye, hicanu]}
+  metamdbg: {$ref: "#/definitions/job"}
+  hifiasm_meta:
+    allOf:
+      - {$ref: "#/definitions/job"}
+      - properties: {include_rescue: {type: boolean}}
+  metaflye: {$ref: "#/definitions/job"}
+  hicanu:
+    allOf:
+      - {$ref: "#/definitions/job"}
+      - properties:
+          genome_size: {type: string}
+          params: {type: string}
+  candidates:
+    type: object
+    properties:
+      min_circular_len: {type: integer, minimum: 1}
+  trim_rotate:
+    type: object
+    properties:
+      overlap_search: {type: integer, minimum: 100}
+      min_overlap: {type: integer, minimum: 1}
+      min_identity: {type: number, minimum: 0, maximum: 1}
+      max_overlap_frac: {type: number, minimum: 0, maximum: 0.5}
+  mapping: {$ref: "#/definitions/job"}
+  junction:
+    type: object
+    properties:
+      min_mapq: {type: integer, minimum: 0, maximum: 255}
+      flank: {type: integer, minimum: 0}
+      min_clip: {type: integer, minimum: 1}
+      clip_window: {type: integer, minimum: 1}
+      min_spanning: {type: integer, minimum: 1}
+      min_span_ratio: {type: number, minimum: 0, maximum: 1}
+      min_depth: {type: number, minimum: 0}
+      repeat_low_mapq_frac: {type: number, minimum: 0, maximum: 1}
+      clip_frac: {type: number, minimum: 0, maximum: 1}
+      min_clip_reads: {type: integer, minimum: 1}
+      cov_window: {type: integer, minimum: 10}
+      low_cov_frac: {type: number, minimum: 0, maximum: 1}
+      igv_reports: {type: boolean}
+  classify:
+    type: object
+    properties:
+      min_chrom_len: {type: integer, minimum: 1}
+      classify_pending: {type: boolean}
+      min_completeness: {type: number, minimum: 0, maximum: 100}
+      max_contamination: {type: number, minimum: 0}
+      genomad_on_all: {type: boolean}
+      skip_checkm2: {type: boolean}
+      skip_gtdbtk: {type: boolean}
+      skip_genomad: {type: boolean}
+  databases:
+    type: object
+    properties:
+      checkm2: {$ref: "#/definitions/path_or_null"}
+      gtdbtk: {$ref: "#/definitions/path_or_null"}
+      genomad: {$ref: "#/definitions/path_or_null"}
+      gtdb_metadata:
+        type: array
+        items: {type: string}
+  checkm2: {$ref: "#/definitions/job"}
+  gtdbtk:
+    allOf:
+      - {$ref: "#/definitions/job"}
+      - properties:
+          pplacer_cpus: {type: integer, minimum: 1}
+          skip_ani_screen: {type: boolean}
+  genomad: {$ref: "#/definitions/job"}
+  derep:
+    type: object
+    properties:
+      min_ani: {type: number, minimum: 0, maximum: 100}
+      min_af: {type: number, minimum: 0, maximum: 100}
+      small_len: {type: integer, minimum: 0}
+      threads: {type: integer, minimum: 1}
+  merge:
+    allOf:
+      - {$ref: "#/definitions/job"}
+      - properties:
+          enabled: {type: boolean}
+          min_contig_len: {type: integer, minimum: 0}
+          min_identity: {type: number, minimum: 0, maximum: 1}
+          max_covered_frac: {type: number, minimum: 0, maximum: 1}
+          min_block: {type: integer, minimum: 0}
+          include_failed_circular: {type: boolean}
+  default_threads: {type: integer, minimum: 1}
+  max_memory_gb: {type: ["number", "null"], exclusiveMinimum: 0}
+
+required: [reads, sample, assemblers, databases]

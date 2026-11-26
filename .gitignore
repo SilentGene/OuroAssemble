@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# pixi / conda
+.pixi/
+pixi.lock.bak
+
+# Snakemake
+.snakemake/
+results/
+ouroassemble_out/
+
+# Example data (downloaded / simulated, not versioned)
+example/data/
+example/genomes/
+example/output/
+
+# Databases
+databases/
+db/
+
+# Claude Code scratch
+.claude.tmp/

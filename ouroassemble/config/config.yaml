@@ -1,0 +1,158 @@
+# =============================================================================
+# OuroAssemble default configuration
+#   `ouroassemble init-config -o my_config.yaml` writes a copy of this file.
+#   Any key you set in your own config overrides the value here (deep merge).
+# =============================================================================
+
+# --- Input ------------------------------------------------------------------
+# PacBio HiFi reads of ONE metagenomic sample (FASTQ/FASTA, optionally gzipped).
+reads: null
+# Sample name, used as a prefix for final output names.
+sample: sample
+
+# --- 01 read filtering ------------------------------------------------------
+min_read_len: 500
+
+# --- 02 assembly ------------------------------------------------------------
+# Assemblers to run (any subset of: metamdbg, hifiasm_meta, metaflye, hicanu).
+assemblers: [metamdbg, hifiasm_meta, metaflye, hicanu]
+# Tie-breaker order when choosing a dereplication representative.
+assembler_priority: [metaflye, metamdbg, hifiasm_meta, hicanu]
+
+metamdbg:
+  extra: ""
+  threads: 32
+  mem_mb: 64000
+  runtime: 2880          # minutes
+
+hifiasm_meta:
+  # hifiasm-meta allocates a ~16 GB Bloom filter by default (-f 37), so give it > 16 GB
+  # even for tiny inputs (or add "-f 0" to `extra` for very small test data).
+  extra: ""
+  # also take circular contigs from *.rescue.fa (flagged source=rescue)
+  include_rescue: false
+  threads: 32
+  mem_mb: 128000
+  runtime: 2880
+
+metaflye:
+  extra: ""
+  threads: 32
+  mem_mb: 128000
+  runtime: 2880
+
+hicanu:
+  genome_size: 5m
+  # recommended HiCanu parameters for metagenomes (AIM.md). genomeSize is only nominal for a
+  # metagenome, so Canu's whole-sample coverage checks are disabled (minInputCoverage /
+  # stopOnLowCoverage), otherwise low-depth samples abort.
+  params: "maxInputCoverage=10000 corOutCoverage=10000 corMhapSensitivity=high corMinCoverage=0 minInputCoverage=0 stopOnLowCoverage=0"
+  extra: ""
+  threads: 32
+  mem_mb: 128000
+  runtime: 4320
+
+# --- 03/04 circular candidates ---------------------------------------------
+candidates:
+  min_circular_len: 1000
+
+# --- 05 overlap trimming & rotation ----------------------------------------
+trim_rotate:
+  overlap_search: 50000  # bp at each end searched for a duplicated overlap
+  min_overlap: 100       # shortest overlap that is trimmed
+  min_identity: 0.999    # identity required to call an overlap duplicated; keeps genuine,
+                         # slightly diverged tandem repeats (e.g. Buchnera pTrp, 99.7 %) intact
+  max_overlap_frac: 0.5  # max overlap as a fraction of contig length (HiCanu may write a small
+                         # circle as ~2 copies, i.e. an overlap of ~50 %)
+
+# --- 06 junction validation -------------------------------------------------
+mapping:
+  threads: 16
+  mem_mb: 48000
+  runtime: 720
+
+junction:
+  min_mapq: 20           # MAPQ for "uniquely placed" reads
+  flank: 1000            # a spanning read must cover J-flank .. J+flank
+  min_clip: 200          # soft/hard clip (or indel) length counted as a break
+  clip_window: 100       # +- bp around a site in which clip ends are pooled
+  min_spanning: 3        # PASS needs >= this many spanning reads ...
+  min_span_ratio: 0.5    # ... and spanning / unique depth at J >= this
+  min_depth: 5           # below this depth at J the candidate is PENDING (low coverage)
+  repeat_low_mapq_frac: 0.5  # fraction of low-MAPQ reads at J that flags a repeat
+  # whole-contig scan for other suspicious sites
+  clip_frac: 0.3         # clipped reads at a site >= clip_frac * local depth ...
+  min_clip_reads: 3      # ... and >= this many reads -> suspicious site
+  cov_window: 1000       # window size for low-coverage scan
+  low_cov_frac: 0.1      # window depth < low_cov_frac * median depth -> suspicious
+  igv_reports: false     # also build an igv-reports HTML of every junction
+
+# --- 07 classification ------------------------------------------------------
+classify:
+  min_chrom_len: 500000  # >= this: CheckM2 + GTDB-Tk; smaller: geNomad
+  classify_pending: true # also classify PENDING candidates (flagged)
+  min_completeness: 90
+  max_contamination: 5
+  genomad_on_all: false  # also screen large circular contigs with geNomad
+  skip_checkm2: false
+  skip_gtdbtk: false
+  skip_genomad: false
+
+# Database paths. If left null they are taken from (in order):
+#   environment variables OUROASSEMBLE_CHECKM2_DB / OUROASSEMBLE_GTDBTK_DB /
+#   OUROASSEMBLE_GENOMAD_DB / OUROASSEMBLE_GTDB_METADATA (comma separated),
+#   then ouroassemble/config/databases.site.yaml (site-local, not distributed).
+# `ouroassemble download-db` fetches them.
+databases:
+  checkm2: null          # path to the CheckM2 .dmnd file
+  gtdbtk: null           # GTDB-Tk reference data directory (GTDBTK_DATA_PATH)
+  genomad: null          # geNomad database directory
+  gtdb_metadata: []      # bac120/ar53 metadata TSV(.gz) for reference genome sizes
+
+checkm2:
+  threads: 16
+  mem_mb: 32000
+  runtime: 720
+
+gtdbtk:
+  threads: 16
+  pplacer_cpus: 1
+  skip_ani_screen: false  # GTDB-Tk >= 2.4 runs a skani ANI screen against the reference data
+  mem_mb: 128000
+  runtime: 1440
+
+genomad:
+  extra: ""
+  threads: 16
+  mem_mb: 32000
+  runtime: 720
+
+# --- 08 dereplication -------------------------------------------------------
+derep:
+  min_ani: 99            # %
+  min_af: 90             # % aligned fraction, required in both directions
+  small_len: 20000       # sequences shorter than this are compared with minimap2 (mappy)
+  threads: 8
+
+# --- 09 merged assembly ----------------------------------------------------
+# One non-redundant assembly from all assemblers. Contigs are only selected (never cut or
+# joined): validated circles first, then linear contigs ranked by read support
+# (suspicious sites from the HiFi re-mapping), length and assembler priority. A contig is
+# dropped when >= max_covered_frac of it is already covered at >= min_identity.
+merge:
+  enabled: true
+  min_contig_len: 1000
+  min_identity: 0.99       # lower identity = kept as a distinct strain / variant
+  max_covered_frac: 0.9
+  min_block: 500           # ignore shorter alignment blocks (repeats, IS elements)
+  include_failed_circular: true  # FAIL circles enter the pool as linear contigs
+  threads: 16
+  mem_mb: 64000
+  runtime: 720
+
+# --- misc ---------------------------------------------------------------------
+default_threads: 4       # for light-weight rules
+# Upper limit (GB) for the memory of ANY single job (`ouroassemble run -m/--memory`).
+# Every step's mem_mb above is capped at this value. When running locally, the total
+# memory of concurrently running jobs is also kept below it. null = no limit.
+max_memory_gb: null

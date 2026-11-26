@@ -1,0 +1,154 @@
+# =============================================================================
+# OuroAssemble — main workflow
+#   PacBio HiFi metagenome -> 4 assemblers -> circular candidates ->
+#   junction validation -> CheckM2/GTDB-Tk/geNomad -> dereplication -> report
+# =============================================================================
+import copy
+import json
+import os
+from pathlib import Path
+
+import yaml
+from snakemake.exceptions import WorkflowError
+from snakemake.utils import min_version, validate
+
+min_version("9.2.0")
+
+WORKFLOW_DIR = Path(workflow.current_basedir)
+PACKAGE_DIR = WORKFLOW_DIR.parent
+SCRIPTS = WORKFLOW_DIR / "scripts"
+DEFAULT_CONFIG = PACKAGE_DIR / "config" / "config.yaml"
+SITE_DB_CONFIG = PACKAGE_DIR / "config" / "databases.site.yaml"
+
+
+# -----------------------------------------------------------------------------
+# configuration: defaults <- user config (deep merge), databases, validation
+# -----------------------------------------------------------------------------
+def _deep_merge(base, override):
+    out = copy.deepcopy(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+with open(DEFAULT_CONFIG) as fh:
+    _merged = _deep_merge(yaml.safe_load(fh), config)
+config.clear()
+config.update(_merged)
+
+
+def _resolve_databases(dbs):
+    """config value > environment variable > site-local file."""
+    site = {}
+    if SITE_DB_CONFIG.exists():
+        with open(SITE_DB_CONFIG) as fh:
+            site = yaml.safe_load(fh) or {}
+    env = {
+        "checkm2": os.environ.get("OUROASSEMBLE_CHECKM2_DB"),
+        "gtdbtk": os.environ.get("OUROASSEMBLE_GTDBTK_DB"),
+        "genomad": os.environ.get("OUROASSEMBLE_GENOMAD_DB"),
+        "gtdb_metadata": [
+            p for p in os.environ.get("OUROASSEMBLE_GTDB_METADATA", "").split(",") if p
+        ]
+        or None,
+    }
+    resolved = {}
+    for key in ("checkm2", "gtdbtk", "genomad", "gtdb_metadata"):
+        value = dbs.get(key)
+        if not value:
+            value = env.get(key) or site.get(key)
+        resolved[key] = value if value else ([] if key == "gtdb_metadata" else None)
+    return resolved
+
+
+config["databases"] = _resolve_databases(config.get("databases") or {})
+
+if not config.get("reads"):
+    raise WorkflowError(
+        "No input reads: set `reads:` in the config or use `ouroassemble run -r READS`."
+    )
+
+validate(config, WORKFLOW_DIR / "schemas" / "config.schema.yaml")
+
+READS = str(Path(config["reads"]).expanduser())
+ASSEMBLERS = list(config["assemblers"])
+CLS = config["classify"]
+DB = config["databases"]
+
+
+def _check_db(key, skip_key, what):
+    if CLS[skip_key]:
+        return
+    path = DB.get(key)
+    if not path or not Path(path).exists():
+        raise WorkflowError(
+            f"{what} database not found ({path!r}). Set databases.{key} in the config, "
+            f"run `ouroassemble download-db {key}`, or set classify.{skip_key}: true."
+        )
+
+
+_check_db("checkm2", "skip_checkm2", "CheckM2")
+_check_db("gtdbtk", "skip_gtdbtk", "GTDB-Tk")
+_check_db("genomad", "skip_genomad", "geNomad")
+
+# filtered reads keep the input record type (FASTQ vs FASTA)
+_lower = READS.lower().removesuffix(".gz")
+READS_EXT = "fa.gz" if _lower.endswith((".fa", ".fasta", ".fna")) else "fq.gz"
+FILTERED_READS = f"01_reads/reads.filtered.{READS_EXT}"
+
+
+wildcard_constraints:
+    asm="|".join(["metamdbg", "hifiasm_meta", "metaflye", "hicanu"]),
+
+
+def job(section):
+    """threads / resources of a config section."""
+    return config[section]
+
+
+MAX_MEM_MB = int(config["max_memory_gb"] * 1024) if config.get("max_memory_gb") else None
+
+
+def cap_mem(mem_mb):
+    """Per-job memory (MB), capped at `max_memory_gb` (ouroassemble run -m/--memory)."""
+    return min(int(mem_mb), MAX_MEM_MB) if MAX_MEM_MB else int(mem_mb)
+
+
+# -----------------------------------------------------------------------------
+# targets
+# -----------------------------------------------------------------------------
+FINAL = [
+    "final/report.html",
+    "final/circular_genomes.tsv",
+    "final/chromosomes.fa",
+    "final/plasmids.fa",
+    "final/viruses.fa",
+    "final/other_circular.fa",
+    "final/pending_review.fa",
+]
+if config["merge"]["enabled"]:
+    FINAL += ["final/merged_assembly.fa", "final/merged_assembly.tsv"]
+if config["junction"]["igv_reports"]:
+    FINAL += expand("05_validation/{asm}/igv_report.html", asm=ASSEMBLERS)
+
+
+# `rule all` (the default target) is defined in ../Snakefile, the main Snakefile,
+# because Snakemake only picks a default target from the main Snakefile.
+
+
+onstart:
+    with open("config.used.yaml", "w") as fh:
+        yaml.safe_dump(dict(config), fh, sort_keys=False)
+
+
+include: "rules/reads.smk"
+include: "rules/assemble.smk"
+include: "rules/candidates.smk"
+include: "rules/validate.smk"
+include: "rules/classify.smk"
+include: "rules/derep.smk"
+include: "rules/merge.smk"
+include: "rules/report.smk"

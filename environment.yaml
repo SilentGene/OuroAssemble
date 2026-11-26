@@ -1,0 +1,27 @@
+# Driver environment for OuroAssemble.
+#   mamba env create -f environment.yaml && conda activate ouroassemble
+# Bioinformatics tools are NOT installed here: Snakemake creates one conda
+# environment per rule (ouroassemble/workflow/envs/*.yaml) on first run.
+name: ouroassemble
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.11
+  - snakemake>=9.2.0
+  - conda>=24.7.1
+  # cluster execution via Snakemake profiles (`ouroassemble run --profile ...`)
+  - snakemake-executor-plugin-cluster-generic>=1.0.9
+  - snakemake-executor-plugin-slurm
+  - typer>=0.12
+  - rich>=13
+  - pyyaml>=6
+  - pip
+  # development
+  - pytest>=8
+  - ruff
+  - numpy
+  - pysam
+  - mappy
+  - pip:
+      - -e .
