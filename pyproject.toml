@@ -40,7 +40,7 @@ artifacts = ["ouroassemble/Snakefile", "ouroassemble/workflow/**", "ouroassemble
 exclude = ["ouroassemble/config/databases.site.yaml"]
 
 [tool.hatch.build.targets.sdist]
-include = ["ouroassemble", "tests", "docs", "example/*.sh", "example/*.md", "README.md", "LICENSE", "environment.yaml"]
+include = ["ouroassemble", "docs", "example/*.sh", "example/*.md", "README.md", "LICENSE", "environment.yaml"]
 exclude = ["ouroassemble/config/databases.site.yaml"]
 
 [tool.ruff]
