@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/logo_wordmark.svg" alt="OuroAssemble" width="520">
+</p>
+
 # OuroAssemble
 
 **OuroAssemble** assembles a **PacBio HiFi metagenome** with four metagenome assemblers
